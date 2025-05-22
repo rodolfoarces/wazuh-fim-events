@@ -16,7 +16,7 @@ requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.
 ## Logging options
 # https://docs.python.org/3/howto/logging-cookbook.html#logging-cookbook
 # create file handler which logs even debug messages
-logger = logging.getLogger("fim-report")
+logger = logging.getLogger("wazuh-fim-events")
 logger.setLevel(logging.INFO)
 fh = logging.StreamHandler()
 fh.setLevel(logging.INFO)
@@ -104,17 +104,21 @@ def getSyscheck(agent_id, limit=1000):
         logger.debug("Finish obtaining files")
         return file_list        
             
-def setSyscheck(fim_data, agent_id, location, socket_address, limit=1000):
+def setSyscheck(agent_data, fim_data, location, socket_address, limit=1000):
+    location = '[{0}] ({1}) {2}'.format(agent_data['id'], agent_data['name'], agent_data['ip'] if 'ip' in agent_data else 'any')
+    location = location.replace('|', '||').replace(':', '|:')
+    
     forward_limit = limit
     counter = 0
     logger.info("Forwarding %d events, in batches of %d events", len(fim_data), int(forward_limit))
+    
     for data in fim_data:
         if counter >= forward_limit:
             time.sleep(1)
             counter = 0
             logger.debug("Pausing 1 second after %d events", int(forward_limit))
             
-        data["agent_id"]= agent_id
+        data["endpoint"] = "syscheck"
         string = '1:{0}->syscheck:{1}'.format(location, json.dumps(data))
         try:
             sock = socket(AF_UNIX, SOCK_DGRAM)
@@ -139,7 +143,7 @@ if __name__ == "__main__":
     
     # Configurations
     script_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
-    config_filename = str(os.path.join(script_dir, "syscollector-report.conf"))
+    config_filename = str(os.path.join(script_dir, "wazuh-fim-events.conf"))
     # Load data from configuration file
     if os.path.isfile(config_filename):
         logger.info("Opening configuration file")
@@ -167,8 +171,9 @@ if __name__ == "__main__":
         getAgentList()
         for agent in agent_list:
             if agent["id"] != '000':
+                agent_data = { "id": agent["id"], "name": agent["name"], "ip": agent["ip"] }
                 logger.info("Obtaining information from agent %s", str(agent["id"]))
                 agent["syscheck"] = getSyscheck(agent["id"], 1000)
                 logger.info("Forwarding information from agent %s", str(agent["id"]))
-                setSyscheck(agent["syscheck"], agent["id"], 'wazuh-manager', SOCKET_ADDR)
+                setSyscheck(agent_data, agent["syscheck"], 'wazuh-manager', SOCKET_ADDR)
                 logger.info("Finished forwarding information from agent %s", str(agent["id"]))
